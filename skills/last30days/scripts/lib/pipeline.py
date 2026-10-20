@@ -2538,11 +2538,6 @@ def run(
     if hiring_summary:
         bundle.artifacts["hiring_signals"] = hiring_summary
 
-    items_by_source = _finalize_items_by_source(
-        bundle.items_by_source, topic=topic, config=config, depth=depth, mock=mock,
-        elapsed=time.monotonic() - run_started,
-    )
-    source_status = _finalize_source_status(bundle.source_status, items_by_source)
     # Normalized set of handles this run resolved for the topic. A candidate
     # authored by one of these is first-party and is exempted from the
     # entity-miss demotion in rerank (a post never repeats its own author's
@@ -2581,6 +2576,14 @@ def run(
             bundle.items_by_source["x"] = signals.prune_low_relevance(
                 bundle.items_by_source["x"], first_party_handles=resolved_handles
             )
+
+    # Finalize after the deferred floor so the report's per-source view and the
+    # source_status counts describe the same post-floor evidence set fusion sees.
+    items_by_source = _finalize_items_by_source(
+        bundle.items_by_source, topic=topic, config=config, depth=depth, mock=mock,
+        elapsed=time.monotonic() - run_started,
+    )
+    source_status = _finalize_source_status(bundle.source_status, items_by_source)
 
     candidates = weighted_rrf(
         bundle.items_by_source_and_query,
