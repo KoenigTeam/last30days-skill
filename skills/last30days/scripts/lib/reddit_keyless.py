@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 
 from collections import Counter
 
-from . import http
+from . import http, reddit
 from . import reddit_rss, reddit_shreddit, reddit_listing, reddit_arctic
 # Scores are backfilled from popular derived subreddits, so an engagement-first
 # final sort buries on-topic RSS hits under viral off-topic posts. A relevance
@@ -77,6 +77,7 @@ def _scored_listings(
     depth: str = "default",
     query: str = "",
     sorts: Optional[List[str]] = None,
+    timeframe: str = "month",
 ) -> List[Dict[str, Any]]:
     """Scored subreddit listings: shreddit partials, arctic-shift supplement.
 
@@ -89,7 +90,9 @@ def _scored_listings(
     ``hot`` or ``new`` are recovered even when only ``top`` succeeded. Never
     raises.
     """
-    posts = reddit_listing.fetch_listings(subreddits, depth=depth, query=query, sorts=sorts)
+    posts = reddit_listing.fetch_listings(
+        subreddits, depth=depth, query=query, sorts=sorts, timeframe=timeframe
+    )
 
     # Supplement with arctic for all requested subreddits. Shreddit's per-sort
     # success/failure is opaque, so arctic provides coverage for any failed
@@ -98,7 +101,7 @@ def _scored_listings(
     if subreddits:
         try:
             arctic_posts = reddit_arctic.fetch_listings(
-                subreddits, depth=depth, query=query, sorts=sorts
+                subreddits, depth=depth, query=query, sorts=sorts, timeframe=timeframe
             )
         except Exception as exc:  # the fallback must never break the pipeline
             _log(f"arctic-shift listing supplement failed: {exc}")
@@ -122,6 +125,7 @@ def _discover(
     depth: str,
     subreddits: Optional[List[str]],
     dedicated_subreddits: Optional[List[str]] = None,
+    timeframe: str = "month",
 ) -> List[Dict[str, Any]]:
     # Dedicated lane: the entity's home subs are wholly on-topic. Pull
     # top+hot+new (real scores from the listing) and mark them floor-exempt so
@@ -129,7 +133,8 @@ def _discover(
     dedicated_posts: List[Dict[str, Any]] = []
     if dedicated_subreddits:
         dedicated_posts = _scored_listings(
-            dedicated_subreddits, depth=depth, query=topic, sorts=DEDICATED_SORTS
+            dedicated_subreddits, depth=depth, query=topic, sorts=DEDICATED_SORTS,
+            timeframe=timeframe,
         )
         for p in dedicated_posts:
             p["dedicated"] = True
@@ -138,12 +143,16 @@ def _discover(
     # search.json is permanently 403/429 keyless (no Tier 0). Discovery is RSS
     # breadth (incl. global keyword search) + broad-sub listing partials for
     # real upvote scores.
-    rss_posts = reddit_rss.search_rss(topic, depth=depth, subreddits=subreddits)
+    rss_posts = reddit_rss.search_rss(
+        topic, depth=depth, subreddits=subreddits, timeframe=timeframe
+    )
 
     if subreddits:
         # Targeted run: the caller chose these subreddits, so their listing cards
         # are on-topic — include them as scored discovery AND as a score source.
-        listing_posts = _scored_listings(subreddits, depth=depth, query=topic)
+        listing_posts = _scored_listings(
+            subreddits, depth=depth, query=topic, timeframe=timeframe
+        )
         score_source = listing_posts
     else:
         # Bare global run: subreddits derived from noisy RSS results are NOT
@@ -152,7 +161,9 @@ def _discover(
         # would flood results with high-upvote but irrelevant posts.
         listing_posts = []
         derived = _top_subreddits(rss_posts)
-        score_source = _scored_listings(derived, depth=depth, query=topic)
+        score_source = _scored_listings(
+            derived, depth=depth, query=topic, timeframe=timeframe
+        )
     _log(
         f"Tier 1 (RSS) {len(rss_posts)} posts; "
         f"{'listing discovery ' + str(len(listing_posts)) if subreddits else 'score-only'}; "
@@ -321,7 +332,13 @@ def search_and_enrich(
         with top_comments/comment_insights attached on enriched posts.
         Empty list when all keyless tiers fail (so SC backup can engage).
     """
-    posts = _discover(topic, depth, subreddits, dedicated_subreddits)
+    # Fetch only the window the run asked for, not a fixed month that the date
+    # filter below would mostly discard. Depth is passed as "default" so the
+    # keyless path keeps its month ceiling at every depth (quick has always
+    # fetched a month here); only shorter windows narrow it and windows wider
+    # than a month widen it.
+    timeframe = reddit.fetch_timeframe(from_date, to_date, "default")
+    posts = _discover(topic, depth, subreddits, dedicated_subreddits, timeframe)
     if not posts:
         return []
 

@@ -94,3 +94,24 @@ class TestSearchRss:
         assert any("/r/Rakuten/search.rss" in u and "restrict_sr=on" in u for u in urls)
         assert any("/r/Rakuten/top.rss" in u for u in urls)
         assert all(".json" not in u for u in urls)  # never the dead endpoint
+
+
+class TestWindowTimeframe:
+    """The requested window picks the feed bucket; month stays the default."""
+
+    def test_default_timeframe_is_month(self):
+        urls = reddit_rss._build_urls("q", "default", ["Rakuten"])
+        assert urls and all("t=month" in u for u in urls)
+
+    def test_timeframe_reaches_every_feed_family(self):
+        urls = reddit_rss._build_urls("q", "default", ["Rakuten"], timeframe="week")
+        # global search, per-sub search, and each listing sort all use the bucket
+        assert len(urls) >= 3
+        assert all("t=week" in u for u in urls)
+        assert not any("t=month" in u for u in urls)
+
+    def test_search_rss_forwards_timeframe(self):
+        with mock.patch.object(reddit_rss, "_fetch_feed", return_value=[]) as fetch:
+            reddit_rss.search_rss("q", subreddits=["Rakuten"], timeframe="week")
+        assert fetch.call_args_list
+        assert all("t=week" in c.args[0] for c in fetch.call_args_list)

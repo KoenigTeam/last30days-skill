@@ -1,0 +1,1 @@
+The free (keyless) Reddit path now fetches the requested window instead of a fixed month, so short `--days` runs stop pulling a month of posts only to discard most of them, and windows wider than a month reach back to the requested start.

@@ -272,7 +272,9 @@ class TestScoredListingsFallback:
                                return_value=[arctic_post]) as arctic:
             out = reddit_keyless._scored_listings(["tea"], depth="quick", query="matcha")
         assert out == [arctic_post]
-        arctic.assert_called_once_with(["tea"], depth="quick", query="matcha", sorts=None)
+        arctic.assert_called_once_with(
+            ["tea"], depth="quick", query="matcha", sorts=None, timeframe="month"
+        )
 
     def test_shreddit_and_arctic_both_called_deduped(self):
         """Shreddit and arctic are both called; arctic supplements missing posts."""
@@ -317,7 +319,8 @@ class TestScoredListingsFallback:
                 ["Kanye"], depth="default", query="Kanye", sorts=["top", "hot", "new"]
             )
         arctic.assert_called_once_with(
-            ["Kanye"], depth="default", query="Kanye", sorts=["top", "hot", "new"]
+            ["Kanye"], depth="default", query="Kanye", sorts=["top", "hot", "new"],
+            timeframe="month",
         )
 
     def test_arctic_supplements_all_subreddits(self):
@@ -349,3 +352,47 @@ class TestScoredListingsFallback:
         assert shreddit_post["url"] in urls
         assert arctic_post_tea["url"] in urls
         assert arctic_post_coffee["url"] in urls
+
+
+class TestWindowTimeframe:
+    """A short --days run must not fetch a month the date filter discards."""
+
+    def _freeze(self, monkeypatch):
+        from datetime import date
+
+        class _FrozenDateTime:
+            @staticmethod
+            def now(tz=None):
+                class _D:
+                    @staticmethod
+                    def date():
+                        return date(2026, 7, 24)
+                return _D()
+
+        monkeypatch.setattr(reddit_keyless.reddit, "datetime", _FrozenDateTime)
+
+    def _timeframe_for(self, from_date, to_date, depth="default"):
+        with mock.patch.object(reddit_keyless, "_discover", return_value=[]) as discover:
+            reddit_keyless.search_and_enrich("t", from_date, to_date, depth=depth)
+        return discover.call_args.args[4]
+
+    def test_short_window_fetches_a_narrow_bucket(self, monkeypatch):
+        self._freeze(monkeypatch)
+        assert self._timeframe_for("2026-07-23", "2026-07-24") == "week"
+
+    def test_default_window_keeps_the_month_bucket_at_every_depth(self, monkeypatch):
+        self._freeze(monkeypatch)
+        for depth in ("quick", "default", "deep"):
+            assert self._timeframe_for("2026-06-24", "2026-07-24", depth) == "month"
+
+    def test_window_wider_than_a_month_reaches_back(self, monkeypatch):
+        self._freeze(monkeypatch)
+        assert self._timeframe_for("2026-04-25", "2026-07-24") == "year"
+
+    def test_timeframe_reaches_rss_and_listings(self):
+        with mock.patch.object(reddit_keyless.reddit_rss, "search_rss", return_value=[_post(1)]) as rss, \
+             mock.patch.object(reddit_keyless.reddit_listing, "fetch_listings", return_value=[]) as listing, \
+             mock.patch.object(reddit_keyless.reddit_arctic, "fetch_listings", return_value=[]):
+            reddit_keyless._discover("topic", "default", ["test"], None, "week")
+        assert rss.call_args.kwargs["timeframe"] == "week"
+        assert listing.call_args.kwargs["timeframe"] == "week"

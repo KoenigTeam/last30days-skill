@@ -6,7 +6,7 @@ post discovery, replacing ``reddit_public.search`` as the free search path.
 
 Two feed families are combined and deduped:
 - search:  /search.rss?q=... and /r/{sub}/search.rss?q=...&restrict_sr=on
-- listing: /r/{sub}/{top,hot}.rss?t=month
+- listing: /r/{sub}/{top,hot}.rss?t={timeframe}  (timeframe defaults to month)
 
 RSS entries carry no engagement score, so ``score``/``num_comments`` start at 0
 and are backfilled during shreddit enrichment (see reddit_shreddit.py). Output
@@ -151,11 +151,20 @@ def _parse_feed(xml_text: str, query: str = "") -> List[Dict[str, Any]]:
     return posts
 
 
-def _build_urls(query: str, depth: str, subreddits: Optional[List[str]]) -> List[str]:
-    """Build the keyless RSS feed URLs to fan out across."""
+def _build_urls(
+    query: str,
+    depth: str,
+    subreddits: Optional[List[str]],
+    timeframe: str = "month",
+) -> List[str]:
+    """Build the keyless RSS feed URLs to fan out across.
+
+    ``timeframe`` is Reddit's rolling ``t`` bucket; callers derive it from the
+    requested window so a short run does not fetch a month it will discard.
+    """
     q = quote_plus(query)
     urls: List[str] = [
-        f"https://www.reddit.com/search.rss?q={q}&sort=relevance&t=month"
+        f"https://www.reddit.com/search.rss?q={q}&sort=relevance&t={timeframe}"
     ]
     for raw_sub in (subreddits or []):
         sub = raw_sub.removeprefix("r/").strip()
@@ -163,10 +172,10 @@ def _build_urls(query: str, depth: str, subreddits: Optional[List[str]]) -> List
             continue
         urls.append(
             f"https://www.reddit.com/r/{sub}/search.rss"
-            f"?q={q}&restrict_sr=on&sort=relevance&t=month"
+            f"?q={q}&restrict_sr=on&sort=relevance&t={timeframe}"
         )
         for sort in LISTING_SORTS.get(depth, LISTING_SORTS["default"]):
-            urls.append(f"https://www.reddit.com/r/{sub}/{sort}.rss?t=month")
+            urls.append(f"https://www.reddit.com/r/{sub}/{sort}.rss?t={timeframe}")
     return urls
 
 
@@ -184,6 +193,7 @@ def search_rss(
     query: str,
     depth: str = "default",
     subreddits: Optional[List[str]] = None,
+    timeframe: str = "month",
 ) -> List[Dict[str, Any]]:
     """Discover Reddit posts for a query via keyless RSS feeds.
 
@@ -191,6 +201,7 @@ def search_rss(
         query: Search query string
         depth: 'quick', 'default', or 'deep' — controls result limit and feeds
         subreddits: Optional pre-resolved subreddit names (without r/) to target
+        timeframe: Reddit rolling ``t`` bucket for the feeds (default month)
 
     Returns:
         List of normalized post dicts (deduped by URL, capped by depth),
@@ -198,7 +209,7 @@ def search_rss(
         Empty list on any failure.
     """
     limit = DEPTH_LIMITS.get(depth, DEPTH_LIMITS["default"])
-    urls = _build_urls(query, depth, subreddits)
+    urls = _build_urls(query, depth, subreddits, timeframe)
 
     all_posts: List[Dict[str, Any]] = []
     workers = min(MAX_WORKERS, len(urls)) or 1
