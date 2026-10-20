@@ -304,3 +304,63 @@ def test_window_to_time_filter_covers_historical_from_date(monkeypatch):
     # One-day request ending two weeks ago: span alone would pick "week" and
     # miss the entire range; age of from_date requires "month".
     assert reddit._window_to_time_filter("2026-07-09", "2026-07-10") == "month"
+
+
+def _freeze_today(monkeypatch, year, month, day):
+    from datetime import date
+    from lib import reddit
+
+    class _FrozenDateTime:
+        @staticmethod
+        def now(tz=None):
+            class _D:
+                @staticmethod
+                def date():
+                    return date(year, month, day)
+            return _D()
+
+    monkeypatch.setattr(reddit, "datetime", _FrozenDateTime)
+
+
+def test_fetch_timeframe_caps_short_windows_by_depth(monkeypatch):
+    from lib import reddit
+
+    _freeze_today(monkeypatch, 2026, 7, 24)
+    # A one-day window never needs more than a week bucket.
+    assert reddit.fetch_timeframe("2026-07-23", "2026-07-24", "default") == "week"
+    # A month window at quick depth is capped to the quick default (week).
+    assert reddit.fetch_timeframe("2026-06-24", "2026-07-24", "quick") == "week"
+    # A month window at default depth is a month.
+    assert reddit.fetch_timeframe("2026-06-24", "2026-07-24", "default") == "month"
+
+
+def test_fetch_timeframe_honors_windows_wider_than_a_month(monkeypatch):
+    """--days 90 / an old --as-of must reach from_date, not be capped to the depth default."""
+    from lib import reddit
+
+    _freeze_today(monkeypatch, 2026, 7, 24)
+    assert reddit.fetch_timeframe("2026-04-25", "2026-07-24", "default") == "year"
+    assert reddit.fetch_timeframe("2026-04-25", "2026-07-24", "quick") == "year"
+    # Short window that ended long ago still needs reach back to from_date.
+    assert reddit.fetch_timeframe("2026-04-01", "2026-04-02", "default") == "year"
+
+
+def test_search_reddit_fetches_the_window_bucket(monkeypatch):
+    from lib import reddit
+
+    _freeze_today(monkeypatch, 2026, 7, 24)
+    seen = []
+
+    def _fake_global(query, token, sort, timeframe):
+        seen.append(timeframe)
+        return []
+
+    monkeypatch.setattr(reddit, "_global_search", _fake_global)
+    monkeypatch.setattr(reddit, "_subreddit_search", lambda *a, **k: [])
+
+    reddit.search_reddit("rust async", "2026-04-25", "2026-07-24", depth="default", token="x")
+    assert seen and set(seen) == {"year"}
+
+    seen.clear()
+    reddit.search_reddit("rust async", "2026-07-23", "2026-07-24", depth="default", token="x")
+    assert seen and set(seen) == {"week"}

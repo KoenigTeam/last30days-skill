@@ -502,6 +502,24 @@ def _window_to_time_filter(from_date: str, to_date: str) -> str:
     return _days_to_reddit_bucket(max(span_days, age_days))
 
 
+def fetch_timeframe(from_date: str, to_date: str, depth: str = "default") -> str:
+    """Reddit ``t`` bucket to fetch for a requested window at a given depth.
+
+    A short window must not fetch the depth's full default span only to have
+    the date filter discard it, so the depth default caps windows of a month
+    or less. A window wider than a month (``--days 90``, an old ``--as-of``) is
+    an explicit request for more reach than any depth default and is honored,
+    otherwise the fetch can never reach ``from_date``.
+    """
+    window_tf = _window_to_time_filter(from_date, to_date)
+    window_rank = _TIMEFRAME_ORDER.get(window_tf, _TIMEFRAME_ORDER["month"])
+    if window_rank > _TIMEFRAME_ORDER["month"]:
+        return window_tf
+    depth_tf = DEPTH_CONFIG.get(depth, DEPTH_CONFIG["default"])["timeframe"]
+    depth_rank = _TIMEFRAME_ORDER.get(depth_tf, _TIMEFRAME_ORDER["month"])
+    return window_tf if window_rank <= depth_rank else depth_tf
+
+
 def search_reddit(
     topic: str,
     from_date: str,
@@ -532,10 +550,8 @@ def search_reddit(
     # Fetch window must track the requested date range, not just the depth
     # default. Otherwise a --days 1 request fetches a month of relevance-
     # sorted posts and Phase 5 discards everything outside 24h (0 on quiet
-    # days). Use the tighter of {window-derived, depth default}.
-    _depth_tf = config["timeframe"]
-    _window_tf = _window_to_time_filter(from_date, to_date)
-    timeframe = _window_tf if _TIMEFRAME_ORDER.get(_window_tf, 3) <= _TIMEFRAME_ORDER.get(_depth_tf, 3) else _depth_tf
+    # days). See fetch_timeframe for how depth and window combine.
+    timeframe = fetch_timeframe(from_date, to_date, depth)
     intent = infer_query_intent(topic)
 
     # === Phase 1: Query Expansion ===
