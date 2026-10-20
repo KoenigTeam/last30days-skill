@@ -616,7 +616,10 @@ class _Item:
 
 
 class TestSourceItemEnrichment:
-    def test_reviews_and_stats_land_on_item_metadata(self):
+    def test_reviews_and_stats_land_on_item_metadata(self, monkeypatch):
+        # enrich_source_items reads the real clock; pin it to the fixture date
+        # so the 1-5 day-old reviews stay inside the recent window.
+        monkeypatch.setattr(amazon, "_today", lambda: TODAY)
         items = [_Item("B000000001"), _Item("B000000002")]
         amazon.enrich_source_items(
             items, depth="default", keyword="bentgo lunch box",
