@@ -129,11 +129,13 @@ class RenderV3Tests(unittest.TestCase):
         self.assertIn("Top clusters:", text)
         self.assertIn("Grounded result", text)
 
-    def test_render_compact_includes_source_errors_section(self):
+    def test_render_compact_omits_source_errors_section(self):
+        # Source errors are diagnostics: the saved raw file (render_full) and
+        # doctor --postmortem carry them; compact stdout does not.
         report = sample_report()
         report.errors_by_source = {"x": "HTTP 400: Bad Request"}
-        text = render.render_compact(report)
-        self.assertIn("## Source Errors", text)
+        self.assertNotIn("## Source Errors", render.render_compact(report))
+        self.assertIn("## Source Errors", render.render_full(report))
 
     def test_failed_x_bookmark_workflow_query_emits_no_solid_floor(self):
         """Regression: generic token overlap must not turn all-zero X noise
@@ -336,7 +338,7 @@ class RenderV3Tests(unittest.TestCase):
 
 
 class OutputEnvelopeTests(unittest.TestCase):
-    """LAW 6 envelope comments: scope "pass through verbatim" unambiguously.
+    """LAW 6 envelopes: scope "pass through verbatim" unambiguously.
 
     Added 2026-04-19 after the Hermes Agent Use Cases failure where two
     consecutive runs dumped `## Ranked Evidence Clusters` as user output.
@@ -359,11 +361,13 @@ class OutputEnvelopeTests(unittest.TestCase):
 
     def test_pass_through_footer_envelope_wraps_emoji_tree(self):
         text = render.render_compact(sample_report())
-        self.assertIn("<!-- PASS-THROUGH FOOTER:", text)
-        self.assertIn("<!-- END PASS-THROUGH FOOTER -->", text)
-        # Emoji footer sits between the two markers.
-        open_idx = text.index("<!-- PASS-THROUGH FOOTER:")
-        close_idx = text.index("<!-- END PASS-THROUGH FOOTER -->")
+        self.assertIn("```text\n---\n", text)
+        self.assertIn("\n---\n```\n\n---\n# END OF last30days CANONICAL OUTPUT", text)
+        self.assertNotIn("<!-- PASS-THROUGH FOOTER:", text)
+        self.assertNotIn("<!-- END PASS-THROUGH FOOTER -->", text)
+        # Emoji footer sits inside the fenced text block.
+        open_idx = text.index("```text\n---\n")
+        close_idx = text.index("\n---\n```\n\n---\n# END OF last30days CANONICAL OUTPUT")
         self.assertIn("All agents reported back!", text[open_idx:close_idx])
 
     def _perplexity_item(self, item_id: str, citations: int) -> schema.SourceItem:
@@ -455,12 +459,12 @@ class OutputEnvelopeTests(unittest.TestCase):
 
     def test_canonical_boundary_scopes_pass_through_to_footer(self):
         text = render.render_compact(sample_report())
-        # New boundary text scopes verbatim to the PASS-THROUGH FOOTER block,
+        # Boundary text scopes verbatim to the fenced footer block,
         # not everything above.
-        self.assertIn("Pass through ONLY the PASS-THROUGH FOOTER block verbatim", text)
+        self.assertIn("Pass through ONLY the fenced `text` footer block above", text)
         # Self-check string is present so the model has a concrete failure signal.
         self.assertIn("### 1.", text)
-        self.assertIn("LAW 6", text)
+        self.assertIn("evidence-dump", text)
         # The prior ambiguous phrasing is gone.
         self.assertNotIn("Pass through the lines ABOVE this boundary verbatim", text)
 
@@ -470,8 +474,11 @@ class OutputEnvelopeTests(unittest.TestCase):
         text = render.render_compact(sample_report())
         self.assertEqual(text.count("<!-- EVIDENCE FOR SYNTHESIS:"), 1)
         self.assertEqual(text.count("<!-- END EVIDENCE FOR SYNTHESIS -->"), 1)
-        self.assertEqual(text.count("<!-- PASS-THROUGH FOOTER:"), 1)
-        self.assertEqual(text.count("<!-- END PASS-THROUGH FOOTER -->"), 1)
+        self.assertEqual(text.count("```text\n---\n"), 1)
+        self.assertEqual(
+            text.count("\n---\n```\n\n---\n# END OF last30days CANONICAL OUTPUT"),
+            1,
+        )
 
     def test_no_dangling_envelope_open_without_close(self):
         # Open/close counts must always match, even for empty clusters.
@@ -482,9 +489,10 @@ class OutputEnvelopeTests(unittest.TestCase):
             text.count("<!-- EVIDENCE FOR SYNTHESIS:"),
             text.count("<!-- END EVIDENCE FOR SYNTHESIS -->"),
         )
+        self.assertEqual(text.count("```text\n---\n"), 1)
         self.assertEqual(
-            text.count("<!-- PASS-THROUGH FOOTER:"),
-            text.count("<!-- END PASS-THROUGH FOOTER -->"),
+            text.count("\n---\n```\n\n---\n# END OF last30days CANONICAL OUTPUT"),
+            1,
         )
 
 
@@ -515,7 +523,8 @@ class SynthesisDirectiveSurvivesTruncationTests(unittest.TestCase):
         # ...and the concrete "do not emit the cluster headings" self-check, so
         # the directive is actionable without the tail boundary.
         self.assertIn("### N.", head)
-        self.assertIn("PASS-THROUGH FOOTER", head)
+        self.assertIn("fenced `text` footer block", head)
+        self.assertNotIn("PASS-THROUGH FOOTER", head)
 
     def test_early_directive_sits_inside_evidence_envelope(self):
         # It is a model instruction, not user output, so it belongs in the
@@ -970,9 +979,9 @@ class DegradedRunBannerTests(unittest.TestCase):
         text = render.render_compact(report)
         self.assertNotIn("## DEGRADED RUN WARNING", text)
 
-    def test_banner_mentions_law_7_and_plan_flag(self):
+    def test_banner_mentions_planning_step_and_plan_flag(self):
         text = render.render_compact(self._bare_named_entity_report())
-        self.assertIn("LAW 7", text)
+        self.assertIn("Step 0.75", text)
         self.assertIn("--plan", text)
 
 
@@ -1780,3 +1789,37 @@ class TestSourceUrlsAreClickable(unittest.TestCase):
         text = "\n".join(render._render_candidate(candidate, "1."))
         self.assertNotIn("\n## forged heading", text)
         self.assertNotIn("URL: [", text)
+
+
+class FooterPluralizationTests(unittest.TestCase):
+    def test_story_pluralizes_to_stories(self):
+        self.assertEqual(
+            render._footer_line_for_source("🟡", "HN", 15, "story", ""),
+            "🟡 HN: 15 stories",
+        )
+        self.assertEqual(
+            render._footer_line_for_source("🟡", "HN", 1, "story", ""),
+            "🟡 HN: 1 story",
+        )
+
+    def test_regular_nouns_keep_plain_s(self):
+        self.assertEqual(
+            render._footer_line_for_source("🟠", "Reddit", 2, "thread", "5 upvotes"),
+            "🟠 Reddit: 2 threads │ 5 upvotes",
+        )
+        self.assertEqual(
+            render._footer_line_for_source("🔵", "X", 1, "post", ""),
+            "🔵 X: 1 post",
+        )
+        self.assertEqual(
+            render._footer_line_for_source("🔴", "YouTube", 0, "video", ""),
+            "🔴 YouTube: 0 videos",
+        )
+
+    def test_every_footer_noun_pluralizes_sanely(self):
+        for _key, _emoji, _label, noun, _eng in render._FOOTER_SOURCES:
+            plural = render._footer_line_for_source("x", "L", 2, noun, "").split("2 ", 1)[1]
+            if noun.endswith("y") and noun[-2] not in "aeiou":
+                self.assertEqual(plural, noun[:-1] + "ies")
+            else:
+                self.assertEqual(plural, noun + "s")

@@ -1,5 +1,7 @@
 import unittest
 
+import pytest
+
 from lib.reddit import (
     _extract_date,
     _extract_score,
@@ -152,7 +154,7 @@ class TestEnrichSelectsTopEngagement(unittest.TestCase):
 
         enriched_urls = []
 
-        def mock_fetch_comments(url, token):
+        def mock_fetch_comments(url, token, **kwargs):
             enriched_urls.append(url)
             return [{"body": "Great thread!", "ups": 10, "author": "testuser"}]
 
@@ -187,7 +189,7 @@ class TestEnrichSelectsTopEngagement(unittest.TestCase):
 
         enriched_urls = []
 
-        def mock_fetch_comments(url, token):
+        def mock_fetch_comments(url, token, **kwargs):
             enriched_urls.append(url)
             return [{"body": "Comment", "ups": 5, "author": "user"}]
 
@@ -229,20 +231,16 @@ class TestEnrichmentBudget(unittest.TestCase):
 
     def test_budget_zero_returns_items_unenriched(self):
         """With budget=0, items are returned without enrichment (not discarded)."""
-        import time as _time
         from unittest.mock import patch
 
         items = self._make_items(3)
 
-        def slow_fetch(url, token):
-            _time.sleep(2)
-            return [{"body": "comment", "score": 10, "author": "u"}]
-
-        with patch("lib.reddit.fetch_post_comments", side_effect=slow_fetch):
+        with patch("lib.reddit.fetch_post_comments") as fetch:
             result = enrich_with_comments(items, "fake-token", depth="quick", budget_seconds=0)
-
-        # All 3 items returned (not discarded)
+        self.assertIs(result, items)
         self.assertEqual(len(result), 3)
+        self.assertTrue(all("top_comments" not in item for item in result))
+        fetch.assert_not_called()
 
     def test_empty_items_returns_immediately(self):
         result = enrich_with_comments([], "fake-token", depth="default", budget_seconds=60)
@@ -306,61 +304,37 @@ def test_window_to_time_filter_covers_historical_from_date(monkeypatch):
     assert reddit._window_to_time_filter("2026-07-09", "2026-07-10") == "month"
 
 
-def _freeze_today(monkeypatch, year, month, day):
-    from datetime import date
+@pytest.mark.parametrize(
+    "depth,from_date,to_date,expected",
+    [
+        ("default", "2026-04-25", "2026-07-24", "year"),
+        ("quick", "2026-06-24", "2026-07-24", "month"),
+        ("deep", "2026-04-25", "2026-07-24", "year"),
+        ("quick", "2026-07-09", "2026-07-10", "month"),
+        ("default", "2026-07-23", "2026-07-24", "week"),
+        ("deep", "2026-07-23", "2026-07-24", "week"),
+    ],
+)
+def test_search_reddit_requests_complete_date_window(monkeypatch, depth, from_date, to_date, expected):
+    from datetime import datetime, timezone
+    from unittest.mock import Mock
+
     from lib import reddit
 
-    class _FrozenDateTime:
-        @staticmethod
-        def now(tz=None):
-            class _D:
-                @staticmethod
-                def date():
-                    return date(year, month, day)
-            return _D()
+    clock = Mock()
+    clock.now.return_value = datetime(2026, 7, 24, tzinfo=timezone.utc)
+    monkeypatch.setattr(reddit, "datetime", clock)
+    global_search = Mock(return_value=[])
+    subreddit_search = Mock(return_value=[])
+    monkeypatch.setattr(reddit, "_global_search", global_search)
+    monkeypatch.setattr(reddit, "_subreddit_search", subreddit_search)
 
-    monkeypatch.setattr(reddit, "datetime", _FrozenDateTime)
+    reddit.search_reddit(
+        "Python", from_date, to_date, depth=depth,
+        token="dummy-scrapecreators-key", subreddits=["Python"],
+    )
 
-
-def test_fetch_timeframe_caps_short_windows_by_depth(monkeypatch):
-    from lib import reddit
-
-    _freeze_today(monkeypatch, 2026, 7, 24)
-    # A one-day window never needs more than a week bucket.
-    assert reddit.fetch_timeframe("2026-07-23", "2026-07-24", "default") == "week"
-    # A month window at quick depth is capped to the quick default (week).
-    assert reddit.fetch_timeframe("2026-06-24", "2026-07-24", "quick") == "week"
-    # A month window at default depth is a month.
-    assert reddit.fetch_timeframe("2026-06-24", "2026-07-24", "default") == "month"
-
-
-def test_fetch_timeframe_honors_windows_wider_than_a_month(monkeypatch):
-    """--days 90 / an old --as-of must reach from_date, not be capped to the depth default."""
-    from lib import reddit
-
-    _freeze_today(monkeypatch, 2026, 7, 24)
-    assert reddit.fetch_timeframe("2026-04-25", "2026-07-24", "default") == "year"
-    assert reddit.fetch_timeframe("2026-04-25", "2026-07-24", "quick") == "year"
-    # Short window that ended long ago still needs reach back to from_date.
-    assert reddit.fetch_timeframe("2026-04-01", "2026-04-02", "default") == "year"
-
-
-def test_search_reddit_fetches_the_window_bucket(monkeypatch):
-    from lib import reddit
-
-    _freeze_today(monkeypatch, 2026, 7, 24)
-    seen = []
-
-    def _fake_global(query, token, sort, timeframe):
-        seen.append(timeframe)
-        return []
-
-    monkeypatch.setattr(reddit, "_global_search", _fake_global)
-    monkeypatch.setattr(reddit, "_subreddit_search", lambda *a, **k: [])
-
-    reddit.search_reddit("rust async", "2026-04-25", "2026-07-24", depth="default", token="x")
-    assert seen and set(seen) == {"year"}
-
-    seen.clear()
-    reddit.search_reddit("rust async", "2026-07-23", "2026-07-24", depth="default", token="x")
-    assert seen and set(seen) == {"week"}
+    assert global_search.call_count > 0
+    assert subreddit_search.call_count > 0
+    assert {call.args[-1] for call in global_search.call_args_list} == {expected}
+    assert {call.args[-1] for call in subreddit_search.call_args_list} == {expected}
