@@ -4366,15 +4366,16 @@ def _run_supplemental_searches(
             for h in ([x_handle] + list(x_related or []))
             if h and h.strip()
         }
-        topic_tokens = {t for t in re.findall(r"[a-z0-9]+", topic.lower()) if len(t) > 2}
         seen = {h.lower() for h in resolved_handles_out}
         for h in [*handles, *related_handles]:
             clean = h.lstrip("@").strip().lower()
             if not clean or clean in seen:
                 continue
-            corroborated = clean in explicit or any(
-                token in clean or clean in token for token in topic_tokens
-            )
+            # "Looks like the topic's subject" is rerank's test: a handle that
+            # contains a topic word or is spelled from word prefixes. A bare
+            # substring match either way admitted fragments ("go" for "Google")
+            # and missed real subjects ("steipete" for "Peter Steinberger").
+            corroborated = clean in explicit or rerank._handle_is_topic(clean, topic)
             if corroborated:
                 resolved_handles_out.append(clean)
                 seen.add(clean)
