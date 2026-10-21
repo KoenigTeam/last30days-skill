@@ -4230,7 +4230,9 @@ def _topic_first_party_candidates(topic: str) -> set[str]:
         tokens.add(mention.lower())
     for word in re.findall(r"[A-Za-z0-9_]{3,15}", topic or ""):
         lowered = word.lower()
-        if lowered not in relevance.STOPWORDS:
+        # Skip query scaffolding ("review", "news", "latest"): it describes the
+        # search, not the subject, and rerank._handle_is_topic skips it too.
+        if lowered not in relevance.STOPWORDS and lowered not in relevance.LOW_SIGNAL_QUERY_TOKENS:
             tokens.add(lowered)
     return tokens
 

@@ -257,6 +257,16 @@ def test_topic_candidates_exclude_stopwords():
     assert "the" not in got and "of" not in got
 
 
+def test_topic_candidates_exclude_query_scaffolding_words():
+    """Words like "review" or "news" describe the search, not the subject, so an
+    account that happens to be named after one must not get first-party status
+    (rerank._handle_is_topic already excludes the same words)."""
+    from lib import pipeline
+    got = pipeline._topic_first_party_candidates("Cursor review latest news")
+    assert "cursor" in got
+    assert not {"review", "latest", "news"} & got
+
+
 def test_topic_candidates_do_not_exempt_unrelated_authors():
     """Candidates only matter when a post's author matches one, so ordinary
     words cost nothing -- no account is named 'lunch'."""
