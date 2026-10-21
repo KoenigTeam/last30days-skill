@@ -64,6 +64,16 @@ def test_short_handles_are_not_corroborated_by_substring_overlap():
     assert _resolve("Chair review", ["ai"]) == []
 
 
+def test_handle_containing_a_full_three_letter_topic_word_is_corroborated():
+    """A short subject name ("Vue") inside a longer handle ("vuejs") is still
+    the subject, while a short fragment of a longer topic word ("go" in
+    "Google") is not."""
+    assert _resolve("Vue", ["vuejs", "go"]) == ["vuejs"]
+    assert _resolve("Google Gemini", ["go"]) == []
+    # Scaffolding words never name the subject, even when contained in a handle.
+    assert _resolve("Cursor review", ["reviewbot"]) == []
+
+
 def test_handle_spelled_from_the_topic_name_is_still_corroborated():
     assert _resolve("Peter Steinberger", ["steipete", "commentator"]) == ["steipete"]
 

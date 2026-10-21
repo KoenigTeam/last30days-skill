@@ -4237,6 +4237,25 @@ def _topic_first_party_candidates(topic: str) -> set[str]:
     return tokens
 
 
+def _handle_contains_topic_word(handle: str, topic: str) -> bool:
+    """True when ``handle`` contains a whole topic word of three or more letters.
+
+    Covers short subject names that sit inside a longer handle ("vuejs" for
+    "Vue"), which rerank._handle_is_topic misses because it only counts
+    containment for words of four or more letters. The containment runs one
+    way only, so a short fragment of a longer topic word ("go" in "Google")
+    never matches, and query scaffolding words ("review", "news") are skipped.
+    """
+    for word in re.findall(r"[a-z0-9]+", (topic or "").lower()):
+        if len(word) < 3:
+            continue
+        if word in relevance.STOPWORDS or word in relevance.LOW_SIGNAL_QUERY_TOKENS:
+            continue
+        if word in handle:
+            return True
+    return False
+
+
 def _name_lane_subject(topic: str) -> str:
     """Resolve the entity name to search for by name, not the whole topic.
 
@@ -4377,7 +4396,13 @@ def _run_supplemental_searches(
             # contains a topic word or is spelled from word prefixes. A bare
             # substring match either way admitted fragments ("go" for "Google")
             # and missed real subjects ("steipete" for "Peter Steinberger").
-            corroborated = clean in explicit or rerank._handle_is_topic(clean, topic)
+            # Rerank's containment needs a 4+ letter word, so a short subject
+            # name inside a longer handle ("vuejs" for "Vue") is added here.
+            corroborated = (
+                clean in explicit
+                or rerank._handle_is_topic(clean, topic)
+                or _handle_contains_topic_word(clean, topic)
+            )
             if corroborated:
                 resolved_handles_out.append(clean)
                 seen.add(clean)
