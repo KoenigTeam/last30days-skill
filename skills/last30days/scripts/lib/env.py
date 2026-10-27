@@ -1223,6 +1223,7 @@ _X_METHOD_LABELS = {
     "xurl": "oauth2",  # xurl CLI (official X API v2, OAuth2, free developer app)
     "xapi": "bearer",
     "xquik": "api_key",
+    "apify": "api_key",
 }
 
 
@@ -1287,7 +1288,10 @@ _X_BACKEND_ORDER = ("bird", "xai", "xurl", "xquik")
 # ambient bearer exported for some other tool never spends X API credits
 # every time the cookie scraper comes back empty; on an official-only
 # host it is the first rung of the auto chain instead (see _X_OFFICIAL).
-_X_BACKEND_OPT_IN = ("grok", "xapi")
+# apify (the apidojo/twitter-scraper-lite Actor, APIFY_API_TOKEN) is here
+# because it is paid and runs through a third-party scraper: an ambient
+# Apify token exported for some other tool must never start spending on X.
+_X_BACKEND_OPT_IN = ("grok", "xapi", "apify")
 
 # All known backends (auto chain + opt-in): valid values for the pin var.
 _X_BACKEND_KNOWN = _X_BACKEND_ORDER + _X_BACKEND_OPT_IN
@@ -1496,6 +1500,10 @@ def _x_backend_available(
     if backend == 'xapi':
         # Key presence only (no network); local_only needs no branch.
         return bool(config.get('X_BEARER_TOKEN'))
+    if backend == 'apify':
+        # Key presence only (no network); it is opt-in, so reaching here
+        # means the pin named it.
+        return bool(config.get('APIFY_API_TOKEN'))
     return False
 
 
@@ -1941,6 +1949,7 @@ def get_x_source_status(config: dict[str, Any], probe: bool = False) -> dict[str
         bird_status["authenticated"] = False
     xai_available = bool(config.get('XAI_API_KEY'))
     xapi_available = bool(config.get('X_BEARER_TOKEN'))
+    apify_available = bool(config.get('APIFY_API_TOKEN'))
 
     # Report the TRUE auth lane (browser / env / keychain) rather than the static
     # "env AUTH_TOKEN" label — tokens usually come from live browser cookies, and
@@ -1997,6 +2006,7 @@ def get_x_source_status(config: dict[str, Any], probe: bool = False) -> dict[str
         'xquik': xquik_available and xquik_working is not False,
         'grok': grok_available,
         'xapi': xapi_available,
+        'apify': apify_available,
     }
     if pin in _X_BACKEND_KNOWN:
         # Pin is exclusive: pinned backend if available, else None (no fallback).
@@ -2011,6 +2021,7 @@ def get_x_source_status(config: dict[str, Any], probe: bool = False) -> dict[str
         "bird_username": bird_status["username"],
         "xai_available": xai_available,
         "xapi_available": xapi_available,
+        "apify_available": apify_available,
         "grok_available": grok_available,
         "xurl_available": xurl_available,
         "xquik_available": xquik_available,

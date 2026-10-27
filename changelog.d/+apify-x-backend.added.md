@@ -1,0 +1,1 @@
+Added an opt-in `apify` X backend that searches X through the Apify Actor `apidojo/twitter-scraper-lite`. Set `APIFY_API_TOKEN` and pin `LAST30DAYS_X_BACKEND=apify`; it covers topic search only, is never auto-selected, caps each call at $0.10, and never retries a paid request.

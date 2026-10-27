@@ -22,6 +22,7 @@ from typing import Any
 
 from . import (
     amazon,
+    apify_x,
     arxiv,
     bird_x,
     bluesky,
@@ -5080,7 +5081,7 @@ def _fetch_x_backend(backend, query, from_date, to_date, depth, config, warnings
     failures (Bird's skipped optional retries or xapi's recent-search window
     truncation) so the X branch can surface them as run artifacts.
     ``deadline`` is the chain's shared ``time.monotonic()`` budget; backends
-    that accept one (bird/grok/xai/xurl/xquik/xapi) clamp their waits to the
+    that accept one (bird/grok/xai/xurl/xquik/xapi/apify) clamp their waits to the
     time left.
 
     Backends are tried in priority order by the caller (env.x_backend_chain);
@@ -5120,6 +5121,9 @@ def _fetch_x_backend(backend, query, from_date, to_date, depth, config, warnings
     elif backend == "xquik":
         result = xquik.search_xquik(query, from_date, to_date, depth=depth, token=env.get_xquik_token(config), deadline=deadline, cancel=cancel)
         items = xquik.parse_xquik_response(result)
+    elif backend == "apify":
+        result = apify_x.search_apify(query, from_date, to_date, depth=depth, token=config.get("APIFY_API_TOKEN") or "", deadline=deadline, cancel=cancel)
+        items = apify_x.parse_apify_response(result)
     elif backend == "xapi":
         result = x_api.search_x(config.get("X_BEARER_TOKEN") or "", query, from_date, to_date, depth=depth, deadline=deadline, cancel=cancel)
         items = result.get("items", []) if isinstance(result, dict) else []

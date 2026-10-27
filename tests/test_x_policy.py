@@ -148,7 +148,7 @@ def test_lane_signal_in_env_file_only_is_ignored(tmp_path, monkeypatch):
 
 def test_constants():
     assert env.X_BACKEND_ORDER == ("bird", "xai", "xurl", "xquik")
-    assert env.X_BACKEND_OPT_IN == ("grok", "xapi")
+    assert env.X_BACKEND_OPT_IN == ("grok", "xapi", "apify")
     assert env.X_OFFICIAL == ("xapi", "xai", "xurl")
     assert set(env.X_OFFICIAL) <= set(env.X_BACKEND_KNOWN)
 
@@ -203,7 +203,7 @@ def test_bird_pin_re_enables_cookie_discovery_on_grok_bot():
 
 
 def test_non_bird_pin_keeps_discovery_off_on_grok_bot():
-    for pin in ("xquik", "grok", "xai", "xurl", "xapi"):
+    for pin in ("xquik", "grok", "xai", "xurl", "xapi", "apify"):
         assert env.x_policy(_grok_bot(LAST30DAYS_X_BACKEND=pin)).cookie_discovery is False
 
 

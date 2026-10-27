@@ -29,7 +29,7 @@ say the next run will try" — rendered as "will use". It is not an
 observation of what served a past run, and runtime failover can still
 diverge mid-run (a present-but-expired paid key passes a presence probe).
 
-Paid lanes (xai, xapi, xquik, serper, and every other API-key backend,
+Paid lanes (xai, xapi, xquik, apify, serper, and every other API-key backend,
 including ScrapeCreators) probe KEY PRESENCE ONLY: a dict lookup, never a
 network call or credential spend. Binary-backed lanes reuse the U1 dependency
 probe layer (``health.probe_dependency``) so a stale shim reads as BROKEN,
@@ -494,8 +494,10 @@ _X_PROBES: Dict[str, Callable[[Dict[str, Any]], BackendFinding]] = {
     "xquik": _key_probe("xquik", "XQUIK_API_KEY", "XQUIK_API_KEY (xquik.com)"),
     # Direct X API v2 with an app-only bearer: key presence only, no network.
     "xapi": _probe_xapi,
+    # Apify-hosted X scraper: key presence only, no network or credit spend.
+    "apify": _key_probe("apify", "APIFY_API_TOKEN", "APIFY_API_TOKEN (apify.com)"),
 }
-_X_PAID = {"xai", "xquik", "xapi"}
+_X_PAID = {"xai", "xquik", "xapi", "apify"}
 # Opt-in backends: never auto-selected; require explicit pin.
 _X_OPT_IN = set(env.X_BACKEND_OPT_IN)
 
@@ -526,6 +528,7 @@ _X_REQUIRES: Dict[str, str] = {
     "xurl": "xurl CLI installed + OAuth2 login",
     "xquik": "XQUIK_API_KEY (xquik.com)",
     "xapi": "X_BEARER_TOKEN (X API v2)",
+    "apify": "APIFY_API_TOKEN (apify.com)",
 }
 
 DESCRIPTORS: Dict[str, ChainDescriptor] = {
